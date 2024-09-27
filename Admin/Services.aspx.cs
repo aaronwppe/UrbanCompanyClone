@@ -1,14 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Configuration;
-using System.Data.SqlClient;
 using System.Data;
-using System.Linq;
-using System.Web;
 using System.Web.UI;
 using System.Web.UI.WebControls;
-using MySql.Data.MySqlClient;
-using Google.Protobuf.WellKnownTypes;
+using UrbanCompanyClone.Exceptions;
 
 namespace UrbanCompanyClone
 {
@@ -21,9 +16,26 @@ namespace UrbanCompanyClone
 
             ServiceDataManager dataManager = new ServiceDataManager();
 
-            BindCategoryDropDownList(dataManager.GetCategoryList());
+            List<Category> categoryList = dataManager.GetCategoryList();
+            List<SubCategory> subCategoryList = dataManager.GetSubCategoryList();
 
-            BindSubCategoryDropDownList(dataManager.GetSubCategoryList());
+            BindDropDownList(CategoryDropDownList, categoryList);
+            //'All' Selected
+            CategoryDropDownList.SelectedIndex = 0;
+
+            BindDropDownList(SubCategoryDropDownList, subCategoryList);
+            //'All' Selected
+            SubCategoryDropDownList.SelectedIndex = 0;
+
+
+
+            //[TO DO] process these ddls client-side dynamically
+            BindDropDownList(AddSubCategoryMPCategoryDDL, categoryList);
+            AddSubCategoryMPCategoryDDL.Items.RemoveAt(0);                  //Remove 'All'
+
+            BindDropDownList(AddServiceMPSubCategoryDDL, subCategoryList);
+            AddServiceMPSubCategoryDDL.Items.RemoveAt(0);                   //Remove 'All'
+
 
             BindServiceGridView(dataManager.GetServiceDataTable());
 
@@ -31,36 +43,14 @@ namespace UrbanCompanyClone
             ViewState["AllServicesLoaded"] = true;
         }
 
-        void BindCategoryDropDownList(List<Category> categories)
+        void BindDropDownList(DropDownList dropDownList, IEnumerable<Object> list)
         {
-            
-            CategoryDropDownList.DataSource = categories;
+            dropDownList.DataSource = list;
 
-            //[CHANGE] value is hardcoded
-            CategoryDropDownList.DataTextField = "Name";
-            CategoryDropDownList.DataValueField = "Id";
+            dropDownList.DataTextField = "Name";
+            dropDownList.DataValueField = "Id";
 
-            CategoryDropDownList.DataBind();
-
-            // select 'All'
-            CategoryDropDownList.SelectedValue = "0";
-
-            return;
-        }
-
-        void BindSubCategoryDropDownList(List<SubCategory> subCategories)
-        {
-            SubCategoryDropDownList.DataSource = subCategories;
-
-            //[CHANGE] value is hardcoded
-            SubCategoryDropDownList.DataTextField = "Name";
-            SubCategoryDropDownList.DataValueField = "Id";
-
-            SubCategoryDropDownList.DataBind();
-
-            // select 'All'
-            SubCategoryDropDownList.SelectedValue = "0";
-
+            dropDownList.DataBind();
             return;
         }
 
@@ -92,7 +82,7 @@ namespace UrbanCompanyClone
             {
                 if (!AllSubCategoriesLoaded)
                 {
-                    BindSubCategoryDropDownList(new ServiceDataManager().GetSubCategoryList());
+                    BindDropDownList(SubCategoryDropDownList, new ServiceDataManager().GetSubCategoryList());
                     ViewState["AllSubCategoriesLoaded"] = true;
                 }
 
@@ -104,8 +94,8 @@ namespace UrbanCompanyClone
 
                 return;
             }
-                 
-            BindSubCategoryDropDownList(new ServiceDataManager().GetSubCategoryList(selectedCategory));
+
+            BindDropDownList(SubCategoryDropDownList, new ServiceDataManager().GetSubCategoryList(selectedCategory));
             ViewState["AllSubCategoriesLoaded"] = false;
 
             BindServiceGridView(new ServiceDataManager().GetServiceDataTableByCategory(selectedCategory));
@@ -120,7 +110,7 @@ namespace UrbanCompanyClone
             // 'All' is selected
             if (selectedSubCategory == 0)
                 return;
- 
+
             BindServiceGridView(new ServiceDataManager().GetServiceDataTableBySubCategory(selectedSubCategory));
             ViewState["AllServicesLoaded"] = false;
             return;
@@ -132,6 +122,137 @@ namespace UrbanCompanyClone
             int serviceId = Convert.ToInt32(ServiceGridView.DataKeys[ServiceGridView.SelectedIndex].Values[columnName[0]]);
 
             Response.Write("Selected Service ID: " + serviceId);
+        }
+
+        protected void ServiceGridView_RowCommand(object sender, GridViewCommandEventArgs e)
+        {
+            if (e.CommandName == "Add")
+            {
+                int selectedID = Convert.ToInt32(e.CommandArgument);
+                SelectModalCategoryTextBox.Text = "Category";
+
+                SelectMPE.Show();
+            }
+        }
+
+        private string SaveImage(FileUpload image)
+        {
+            String savePath = @"Uploads\" + Server.HtmlEncode(image.FileName);
+
+            image.SaveAs(Request.PhysicalApplicationPath + savePath);
+
+            return savePath;
+        }
+
+        protected void AddCategoryMP_Submit(object sender, EventArgs e)
+        {
+            //Keep Modal Open
+            AddCategoryMPE.Show();
+
+            String categoryName = NewCategoryNameTextBox.Text;
+            FileUpload iconFile = NewCategoryIconFileUpload;
+
+            if (!iconFile.HasFile)
+                return;
+
+            String savePath = SaveImage(iconFile);
+
+            try
+            {
+                int categoryId = new ServiceDataManager().AddNewCategory(categoryName, savePath);
+                NewCategoryNameTextBox.Text = string.Empty;
+                AddCategoryMPE.Hide();
+
+                Response.Write("Category Added Successfully!");
+            }
+            catch (DuplicateCategoryException ex)
+            {
+                Response.Write($"Category name not unique [ID:{ex.CategoryId}]");
+            }
+            catch (Exception)
+            {
+                //[TO-DO] Handle MySqlException
+                Response.Write("Category could not be added!");
+            }
+        }
+
+        protected void AddSubCategoryMP_Submit(object sender, EventArgs e)
+        {
+            //Keep Modal Open
+            AddCategoryMPE.Show();
+
+            Int32 categoryId = Convert.ToInt32(AddSubCategoryMPCategoryDDL.SelectedValue);
+            String subCategoryName = NewSubCategoryNameTextBox.Text;
+            FileUpload iconFile = NewSubCategoryIconFileUpload;
+
+            if (!iconFile.HasFile)
+                return;
+
+            String savePath = SaveImage(iconFile);
+
+            try
+            {
+                int subCategoryId = new ServiceDataManager().AddNewSubCategory(subCategoryName, savePath, categoryId);
+                NewCategoryNameTextBox.Text = string.Empty;
+                AddCategoryMPE.Hide();
+
+                Response.Write("SubCategory Added Successfully!");
+            }
+            catch (InvalidCategoryException)
+            {
+                Response.Write("Category does not exist!");
+            }
+            catch (DuplicateSubCategoryException ex)
+            {
+                Response.Write($"Sub category name not unique [ID:{ex.SubCategoryId}]");
+            }
+            catch (Exception)
+            {
+                //[TO-DO] Handle MySqlException
+                Response.Write("SubCategory could not be added!");
+            }
+        }
+
+        protected void AddServiceMP_Submit(object sender, EventArgs e)
+        {
+            //Keep Modal Open
+            AddServiceMPE.Show();
+
+            Int32 subCategoryId = Convert.ToInt32(AddServiceMPSubCategoryDDL.SelectedValue);
+            String serviceName = AddServiceMP_ServiceNameTextBox.Text;
+            FileUpload imageFile = AddServiceMP_ImageFileUpload;
+            String description = AddServiceMP_DescriptionTextBox.Text;
+            //(4,2) constraint of decimal needs to be handled
+            Decimal cost = Convert.ToDecimal(AddServiceMP_CostTextBox.Text);
+
+            if (!imageFile.HasFile)
+                return;
+
+            String savePath = SaveImage(imageFile);
+
+            try
+            {
+                int serviceId = new ServiceDataManager().AddNewService(serviceName, savePath, description, cost, subCategoryId);
+                AddServiceMP_ServiceNameTextBox.Text = string.Empty;
+                AddServiceMP_DescriptionTextBox.Text = string.Empty;
+                AddServiceMP_CostTextBox.Text = string.Empty;
+                AddCategoryMPE.Hide();
+
+                Response.Write("Service Added Successfully!");
+            }
+            catch (InvalidSubCategoryException)
+            {
+                Response.Write("Sub Category does not exist!");
+            }
+            catch (DuplicateServiceException ex)
+            {
+                Response.Write($"Service name not unique [ID:{ex.ServiceId}]");
+            }
+            catch (Exception)
+            {
+                //[TO-DO] Handle MySqlException
+                Response.Write("Service could not be added!");
+            }
         }
     }
 }
